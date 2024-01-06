@@ -4,11 +4,21 @@ const User = require("../models/User");
 
 class DocumentController {
   async list(req, res) {
-    const { page = 1, limit = 20, ...where } = req.query;
+    const { page = 1, limit = 20, owner, ...where } = req.query;
 
     where.deletedAt = null;
 
     try {
+      if (owner) {
+        const userDB = await User.findOne({ external_id: owner });
+
+        if (userDB) {
+          where.owner = userDB._id;
+        }
+      }
+
+      console.log({ where });
+
       const totalCount = await Document.countDocuments(where);
       const data = await Document.find(where)
         .skip((parseInt(page) - 1) * limit)

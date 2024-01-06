@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const Account = require("../models/Account");
+const User = require("../models/User");
 const bcrypt = require("bcrypt");
 
 class AuthController {
@@ -34,9 +35,11 @@ class AuthController {
         }
       );
 
+      const user = await User.findOne({ _id: account.user }).populate("role");
+
       res.status(200).json({
         msg: "Inicio de sesión exitoso",
-        data: { token, user: account.user },
+        data: { token, user },
       });
     } catch (error) {
       console.error(error);

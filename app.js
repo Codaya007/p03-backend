@@ -3,6 +3,7 @@ var express = require("express");
 var path = require("path");
 var cookieParser = require("cookie-parser");
 var logger = require("morgan");
+var cors = require("cors"); // Importa el módulo cors
 
 var routes = require("./src/routes");
 
@@ -17,6 +18,11 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, "public")));
+// app.use(express.static(path.join(__dirname, "uploads")));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+// Agrega el middleware cors antes de las rutas
+app.use(cors());
 
 //! Al añadir cruds no modificar este archivo sino ./routes/index.js
 app.use("/", routes);

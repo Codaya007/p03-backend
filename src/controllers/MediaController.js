@@ -58,14 +58,15 @@ class MediaController {
 
             const newName = path.join(uploadDir, name + "." + extension);
             const relativePath = "/uploads" + "/" + name + "." + extension;
-            const completePath = path.resolve(
-              __dirname,
-              "..",
-              "..",
-              "uploads",
-              name + "." + extension
-            );
-            const baseURL = path.resolve(__dirname, "..", "..");
+            const baseURL = "http://localhost:3000";
+            // const completePath = path.resolve(
+            //   __dirname,
+            //   "..",
+            //   "..",
+            //   "uploads",
+            //   name + "." + extension
+            // );
+            const completePath = baseURL + relativePath;
 
             fs.rename(file.filepath, newName, function (err) {
               if (err) {
