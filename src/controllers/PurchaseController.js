@@ -8,6 +8,9 @@ const moment = require("moment-timezone");
 
 class PurchaseController {
   async create(req, res) {
+    const session = await Purchase.startSession();
+    session.startTransaction();
+
     try {
       const {
         clientFullName,
@@ -61,9 +64,11 @@ class PurchaseController {
           // Validar que hay en stock las cantidades pedidas
           const currentQyt = document.totalQyt - document.qytSelled;
 
+          // console.log({ document, currentQyt, qyt });
+
           if (currentQyt < qyt) {
             throw new ApiCustomError(
-              `El document '${document.title}' no tiene el inventario solicitado, quedan ${currentQyt} unidades`,
+              `El documento '${document.title}' no tiene el inventario solicitado, quedan ${currentQyt} unidades`,
               400
             );
           }
@@ -84,28 +89,37 @@ class PurchaseController {
       const IVA = subtotal * IVA_PERCENTAJE;
       const totalAmount = subtotal + IVA;
 
-      // Crear la compra
-      const purchase = await Purchase.create({
-        clientFullName,
-        clientDni,
-        clientAddress,
-        clientPhone,
-        subtotal,
-        IVA,
-        totalAmount,
-        paymentType,
-        products: productsDetails,
-      });
+      // Crear la compra dentro de la transacción
+      const purchase = await Purchase.create(
+        [
+          {
+            clientFullName,
+            clientDni,
+            clientAddress,
+            clientPhone,
+            subtotal,
+            IVA,
+            totalAmount,
+            paymentType,
+            products: productsDetails,
+          },
+        ],
+        { session }
+      );
 
       // Como la orden se creó exitosamente, actualizo los documentos, incrementando la cantidad vendida
       await Promise.all(
         productsDetails.map(async (prod) => {
           await Document.updateOne(
             { _id: prod.document },
-            { $inc: { qytSelled: prod.qyt } }
+            { $inc: { qytSelled: prod.qyt } },
+            { session }
           );
         })
       );
+
+      await session.commitTransaction();
+      session.endSession();
 
       res.status(201).json({
         msg: "OK",
@@ -113,6 +127,9 @@ class PurchaseController {
       });
     } catch (error) {
       console.error(error);
+
+      await session.abortTransaction();
+      session.endSession();
 
       if (error.customError) {
         return res.status(error.status || 500).json({
@@ -203,17 +220,20 @@ class PurchaseController {
   }
 
   async updateById(req, res) {
-    const { external_id } = req.params;
-    const {
-      clientFullName,
-      clientDni,
-      clientAddress,
-      clientPhone,
-      paymentType,
-      products,
-    } = req.body;
+    const session = await Purchase.startSession();
+    session.startTransaction();
 
     try {
+      const { external_id } = req.params;
+      const {
+        clientFullName,
+        clientDni,
+        clientAddress,
+        clientPhone,
+        paymentType,
+        products,
+      } = req.body;
+
       let subtotal, IVA, totalAmount;
 
       if (clientDni && !DNI_REGEX.test(clientDni)) {
@@ -266,7 +286,7 @@ class PurchaseController {
 
             if (currentQyt < qyt) {
               throw new ApiCustomError(
-                `El document '${document.title}' no tiene el inventario solicitado, quedan ${currentQyt} unidades`,
+                `El documento '${document.title}' no tiene el inventario solicitado, quedan ${currentQyt} unidades`,
                 400
               );
             }
@@ -289,7 +309,7 @@ class PurchaseController {
         totalAmount = subtotal + IVA;
       }
 
-      // Update the purchase
+      // Actualizar la compra dentro de la transacción
       const updatedPurchase = await Purchase.findOneAndUpdate(
         { _id: existingPurchase._id },
         {
@@ -303,7 +323,7 @@ class PurchaseController {
           IVA,
           totalAmount,
         },
-        { new: true } // Return the updated document
+        { new: true, session } // Return the updated document
       );
 
       if (products) {
@@ -312,7 +332,8 @@ class PurchaseController {
           existingPurchase.products.map(async (prod) => {
             await Document.updateOne(
               { _id: prod.document },
-              { $inc: { qytSelled: -1 * (prod.qyt || 0) } }
+              { $inc: { qytSelled: -1 * (prod.qyt || 0) } },
+              { session }
             );
           })
         );
@@ -321,7 +342,8 @@ class PurchaseController {
           productsDetails.map(async (prod) => {
             await Document.updateOne(
               { _id: prod.document },
-              { $inc: { qytSelled: prod.qyt } }
+              { $inc: { qytSelled: prod.qyt } },
+              { session }
             );
           })
         );
@@ -329,12 +351,18 @@ class PurchaseController {
 
       await updatedPurchase.refreshExternal();
 
+      await session.commitTransaction();
+      session.endSession();
+
       res.status(200).json({
         msg: "OK",
         data: updatedPurchase,
       });
     } catch (error) {
       console.error(error);
+
+      await session.abortTransaction();
+      session.endSession();
 
       if (error.customError) {
         return res.status(error.status || 500).json({

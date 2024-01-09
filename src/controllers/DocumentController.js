@@ -17,17 +17,23 @@ class DocumentController {
         }
       }
 
-      console.log({ where });
+      // console.log({ where });
 
       const totalCount = await Document.countDocuments(where);
-      const data = await Document.find(where)
+      let data = await Document.find(where)
         .skip((parseInt(page) - 1) * limit)
         .limit(limit)
         .exec();
 
-      data.map(async (document) => {
-        //
-      });
+      data = await Promise.all(
+        data.map(async (document) => {
+          document = document.toJSON();
+          // Calculo la cantidad restante de libros
+          document.qyt = document.totalQyt - document.qytSelled;
+
+          return document;
+        })
+      );
 
       res.status(200).json({
         msg: "OK",
