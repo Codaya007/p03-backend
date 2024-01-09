@@ -199,7 +199,9 @@ class PurchaseController {
     const { external_id } = req.params;
 
     try {
-      const data = await Purchase.findOne({ external_id });
+      const data = await Purchase.findOne({ external_id })
+        .populate("products.seller")
+        .populate("products.document", ["external_id", "images", "ISBN"]);
 
       if (!data) {
         return res.status(404).json({
