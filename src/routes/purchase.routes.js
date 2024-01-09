@@ -21,10 +21,16 @@ purchaseRouter.get(
 
 purchaseRouter.get("/:external_id", isLoggedIn, purchaseController.getById);
 
-purchaseRouter.get(
-  "/bySeller/:external_id",
+purchaseRouter.patch(
+  "/:external_id",
   isLoggedIn,
-  purchaseController.listBySeller
+  purchaseController.updateById
 );
+
+// purchaseRouter.get(
+//   "/bySeller/:external_id",
+//   isLoggedIn,
+//   purchaseController.listBySeller
+// );
 
 module.exports = purchaseRouter;

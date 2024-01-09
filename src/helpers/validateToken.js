@@ -3,7 +3,7 @@ const jwt = require("jsonwebtoken");
 
 // Función para validar el token
 const validateToken = async (token) => {
-  console.log({ token });
+  // console.log({ token });
   return new Promise((resolve, reject) => {
     // Verifica el token usando la clave secreta
     jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {

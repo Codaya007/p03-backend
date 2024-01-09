@@ -109,17 +109,39 @@ class PurchaseController {
   }
 
   async list(req, res) {
-    const { page = 1, limit = 20, ...where } = req.query;
+    const { page = 1, limit = 20, seller, ...where } = req.query;
+    let sellerID;
 
     where.deletedAt = null;
 
     try {
+      // Si se envía un seller, solo deben enviarse las órdenes que contengan esos productos
+      if (seller) {
+        const sellerDB = await User.findOne({ external_id: seller });
+        sellerID = sellerDB?._id;
+
+        where["products.seller"] = sellerDB._id;
+      }
+
+      // console.log({ where });
+
       const totalCount = await Purchase.countDocuments(where);
-      const data = await Purchase.find(where)
+      let data = await Purchase.find(where)
         .populate("products.seller")
+        .populate("products.document", ["external_id", "images", "ISBN"])
         .skip((parseInt(page) - 1) * limit)
         .limit(limit)
         .exec();
+
+      if (seller) {
+        data.map((item) => {
+          item.products = item.products.filter((prod) => {
+            const productSellerId = prod.seller?._id;
+
+            return productSellerId.toString() === sellerID.toString();
+          });
+        });
+      }
 
       res.status(200).json({
         msg: "OK",
@@ -153,6 +175,123 @@ class PurchaseController {
         data,
       });
     } catch (error) {
+      res.status(500).json({
+        msg: "Algo salió mal",
+        error: error.message,
+      });
+    }
+  }
+
+  async updateById(req, res) {
+    const { external_id } = req.params;
+    const {
+      clientFullName,
+      clientDni,
+      clientAddress,
+      clientPhone,
+      paymentType,
+      products,
+    } = req.body;
+
+    try {
+      let subtotal, IVA, totalAmount;
+
+      if (clientDni && !DNI_REGEX.test(clientDni)) {
+        return res.status(400).json({
+          msg: "La cédula del cliente no es válida",
+        });
+      }
+
+      if (clientPhone && !PHONE_REGEX.test(clientPhone)) {
+        return res.status(400).json({
+          msg: "La número de teléfono del cliente no es válido",
+        });
+      }
+
+      const existingPurchase = await Purchase.findOne({ external_id });
+
+      if (!existingPurchase) {
+        return res.status(404).json({
+          msg: "La compra especificada no existe",
+        });
+      }
+
+      // Obtener detalles de productos
+      let productsDetails;
+
+      if (products) {
+        subtotal = 0;
+
+        productsDetails = await Promise.all(
+          products.map(async (product) => {
+            const { document: externalDocumentId, qyt = 1 } = product;
+
+            // Verificar si el documento y el vendedor existen
+            const document = await Document.findOne({
+              external_id: externalDocumentId,
+            });
+
+            if (!document) {
+              throw new ApiCustomError(
+                "Algunos productos ya no están disponibles",
+                `${externalDocumentId}`,
+                404
+              );
+            }
+
+            const seller = await User.findOne({ _id: document.owner });
+
+            const totalPrice = document.price * qyt;
+            subtotal += totalPrice;
+
+            return {
+              name: `${document.type} '${document.title}'`,
+              unitPrice: document.price,
+              totalPrice,
+              qyt,
+              document: document._id,
+              seller: seller?._id || null,
+            };
+          })
+        );
+
+        IVA = subtotal * IVA_PERCENTAJE;
+        totalAmount = subtotal + IVA;
+      }
+
+      // Update the purchase
+      const updatedPurchase = await Purchase.findOneAndUpdate(
+        { _id: existingPurchase._id },
+        {
+          clientFullName,
+          clientDni,
+          clientAddress,
+          clientPhone,
+          paymentType,
+          products: productsDetails,
+          subtotal,
+          IVA,
+          totalAmount,
+        },
+        { new: true } // Return the updated document
+      );
+
+      await updatedPurchase.refreshExternal();
+
+      res.status(200).json({
+        msg: "OK",
+        data: updatedPurchase,
+      });
+    } catch (error) {
+      console.error(error);
+
+      if (error.customError) {
+        return res.status(error.status || 500).json({
+          msg: error.message,
+          error: error.details,
+        });
+      }
+
       res.status(500).json({
         msg: "Algo salió mal",
         error: error.message,
@@ -245,44 +384,44 @@ class PurchaseController {
     }
   }
 
-  async listBySeller(req, res) {
-    const { page = 1, limit = 20, ...where } = req.query;
-    const { external_id } = req.params;
+  // async listBySeller(req, res) {
+  //   const { page = 1, limit = 20, ...where } = req.query;
+  //   const { external_id } = req.params;
 
-    try {
-      const sellerDB = await User.findOne({ external_id });
-      const seller = sellerDB._id || null;
+  //   try {
+  //     const sellerDB = await User.findOne({ external_id });
+  //     const seller = sellerDB._id || null;
 
-      const startDate = moment()
-        .tz("America/Guayaquil")
-        .startOf("day")
-        .subtract(15, "days")
-        .toDate();
-      const endDate = moment().tz("America/Guayaquil").endOf("day").toDate();
+  //     const startDate = moment()
+  //       .tz("America/Guayaquil")
+  //       .startOf("day")
+  //       .subtract(15, "days")
+  //       .toDate();
+  //     const endDate = moment().tz("America/Guayaquil").endOf("day").toDate();
 
-      const purchases = await Purchase.find({
-        "products.seller": seller,
-        createdAt: { $gte: startDate, $lte: endDate },
-        ...where,
-      })
-        .skip((parseInt(page) - 1) * limit)
-        .limit(limit);
-      // .populate("products.document");
+  //     const purchases = await Purchase.find({
+  //       "products.seller": seller,
+  //       "products.document": { $exists: true }, // Only include orders with books
+  //       createdAt: { $gte: startDate, $lte: endDate },
+  //       ...where,
+  //     })
+  //       .skip((parseInt(page) - 1) * limit)
+  //       .limit(limit);
 
-      res.status(200).json({
-        msg: "OK",
-        totalCount: purchases.length,
-        data: purchases,
-      });
-    } catch (error) {
-      console.error(error);
+  //     res.status(200).json({
+  //       msg: "OK",
+  //       totalCount: purchases.length,
+  //       data: purchases,
+  //     });
+  //   } catch (error) {
+  //     console.error(error);
 
-      res.status(500).json({
-        msg: "Algo salió mal",
-        error: error.message,
-      });
-    }
-  }
+  //     res.status(500).json({
+  //       msg: "Algo salió mal",
+  //       error: error.message,
+  //     });
+  //   }
+  // }
 }
 
 module.exports = PurchaseController;
