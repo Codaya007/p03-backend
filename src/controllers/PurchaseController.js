@@ -4,7 +4,7 @@ const Document = require("../models/Document");
 const { DNI_REGEX, PHONE_REGEX, IVA_PERCENTAJE } = require("../constants");
 const ApiCustomError = require("../errors/ApiError");
 const moment = require("moment-timezone");
-const { Types } = require("mongoose");
+// const { Types } = require("mongoose");
 
 class PurchaseController {
   async create(req, res) {
@@ -58,6 +58,16 @@ class PurchaseController {
 
           const seller = await User.findOne({ _id: document.owner });
 
+          // Validar que hay en stock las cantidades pedidas
+          const currentQyt = document.totalQyt - document.qytSelled;
+
+          if (currentQyt < qyt) {
+            throw new ApiCustomError(
+              `El document '${document.title}' no tiene el inventario solicitado, quedan ${currentQyt} unidades`,
+              400
+            );
+          }
+
           const totalPrice = document.price * qyt;
           subtotal += totalPrice;
 
@@ -86,6 +96,16 @@ class PurchaseController {
         paymentType,
         products: productsDetails,
       });
+
+      // Como la orden se creó exitosamente, actualizo los documentos, incrementando la cantidad vendida
+      await Promise.all(
+        productsDetails.map(async (prod) => {
+          await Document.updateOne(
+            { _id: prod.document },
+            { $inc: { qytSelled: prod.qyt } }
+          );
+        })
+      );
 
       res.status(201).json({
         msg: "OK",
@@ -241,6 +261,16 @@ class PurchaseController {
 
             const seller = await User.findOne({ _id: document.owner });
 
+            // Validar que hay en stock las cantidades pedidas
+            const currentQyt = document.totalQyt - document.qytSelled;
+
+            if (currentQyt < qyt) {
+              throw new ApiCustomError(
+                `El document '${document.title}' no tiene el inventario solicitado, quedan ${currentQyt} unidades`,
+                400
+              );
+            }
+
             const totalPrice = document.price * qyt;
             subtotal += totalPrice;
 
@@ -275,6 +305,27 @@ class PurchaseController {
         },
         { new: true } // Return the updated document
       );
+
+      if (products) {
+        // Como la orden se actualizó exitosamente, quito las cantidades antes vendidas
+        await Promise.all(
+          existingPurchase.products.map(async (prod) => {
+            await Document.updateOne(
+              { _id: prod.document },
+              { $inc: { qytSelled: -1 * (prod.qyt || 0) } }
+            );
+          })
+        );
+        // Como la orden se creó exitosamente, actualizo los documentos, incrementando la cantidad vendida
+        await Promise.all(
+          productsDetails.map(async (prod) => {
+            await Document.updateOne(
+              { _id: prod.document },
+              { $inc: { qytSelled: prod.qyt } }
+            );
+          })
+        );
+      }
 
       await updatedPurchase.refreshExternal();
 
